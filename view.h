@@ -1,20 +1,46 @@
-#ifndef vinfo_HEADER_H
-#define vinfo_HEADER_H
+#ifndef VIEW_H
+#define VIEW_H
 
+#include<stdio.h>
 #include "types.h"
 
-typedef struct
-{
+#define MAX_FRAME_ID_SIZE 5
 
+typedef struct _ViewInfo
+{
+    /* MP3 audio file info */
     char *mp3_fname;
     FILE *fptr_mp3;
 
-}V_MP3INFO;
+    /* Frame info */
+    char frame_id[MAX_FRAME_ID_SIZE];
+    uint frame_size;
 
-OperationType check_operationtype(char opt);
-Status read_and_validate_args(char *argv[],V_MP3INFO *vinfo);
-Status open_files(V_MP3INFO *vinfo);
-void view_operation(V_MP3INFO *vinfo);
-uint get_size(unsigned char *size_buffer);
+    /* Edit info */
+    char *edit_frame;
+    char *edit_data;
+    char *temp_mp3_fname;
+    FILE *fptr_temp_mp3;
+    uint new_frame_size;
+
+
+
+} ViewInfo;
+
+
+/* View Function prototype */
+
+/* Check operation type */
+OperationType checkoperation_type(char ch);
+
+/* Read and validate view args from argv */
+Status read_and_validate_view_args(char *argv[],ViewInfo *viewinfo);
+
+/* Perform the view */
+Status do_view(ViewInfo *viewinfo);
+
+/* Tag Validation */
+Status validate(char frameid[]);
+
 
 #endif

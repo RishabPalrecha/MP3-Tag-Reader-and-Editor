@@ -1,28 +1,38 @@
-#ifndef EDIT_HEADER_H
-#define EDIT_HEADER_H
+#ifndef EDIT_H
+#define EDIT_H
 
-#include "types.h"
+#include "view.h"
 
-typedef struct
-{
+/* Edit Function prototype*/
 
-    char *mp3_fname;
-    FILE *fptr_mp3;
+/* Menu */
+void menu();
 
-    char *tag_to_edit;
-    char *new_data;
+/* Get frame id */
+char* get_frame(char ch);
 
-    char *temp_mp3_fname;
-    FILE *fptr_temp_mp3;
+/* Tag Validation */
+Status validate_edit_tag(char ch);
 
-}E_MP3INFO;
+/* Read and validate edit args from argv */
+Status read_and_validate_edit_args(char *argv[],ViewInfo *viewinfo);
 
-OperationType check_operationtype(char opt);
-Status read_and_validate_edit_args(char *argv[],E_MP3INFO *einfo);
-Status get_tag_to_edit(char e_tag,E_MP3INFO *einfo);
-Status open_edit_files(E_MP3INFO *einfo);
-void do_edit(E_MP3INFO *einfo);
-void convert_little_to_big(int size, unsigned char *new_size);
-uint get_e_size(unsigned char *size_buffer);
+/* Perform the edit */
+Status do_edit(ViewInfo *viewinfo);
 
-#endif
+/* Creating temp.mp3 file */
+Status create_file(ViewInfo *viewinfo);
+
+/* Copying the header to temp file */
+Status copy_header(ViewInfo *viewinfo);
+
+/* Edit the tag data and size */
+Status edit_tag(ViewInfo *viewinfo, char tag_buffer[]);
+
+/* Copy the data */
+Status copy_data(ViewInfo *viewinfo, char tag_buffer[]);
+
+/* Reading value in Big endian format */
+Status big_endian_to_integer(char buffer[], ViewInfo *viewinfo);
+
+#endif 
