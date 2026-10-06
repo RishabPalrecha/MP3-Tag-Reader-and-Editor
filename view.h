@@ -1,51 +1,20 @@
-#ifndef MP3_HEADER_H
-#define MP3_HEADER_H
+#ifndef vinfo_HEADER_H
+#define vinfo_HEADER_H
 
-#include<stdio.h>
 #include "types.h"
 
 typedef struct
 {
 
     char *mp3_fname;
-    FILE *fptr_mp3fname;
+    FILE *fptr_mp3;
 
-}MP3;
+}V_MP3INFO;
 
 OperationType check_operationtype(char opt);
-Status read_and_validate_args(char *argv[],MP3 *vinfo);
-Status open_files(MP3 *vinfo);
-void view_operation(MP3 *vinfo);
-unsigned int get_size(unsigned char *size_buffer);
-
-#endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Status read_and_validate_args(char *argv[],V_MP3INFO *vinfo);
+Status open_files(V_MP3INFO *vinfo);
+void view_operation(V_MP3INFO *vinfo);
+uint get_size(unsigned char *size_buffer);
 
 #endif
