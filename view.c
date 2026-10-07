@@ -1,122 +1,119 @@
-#include<stdio.h>
-#include<string.h>
-#include "types.h"
+#include <stdio.h>
+#include <string.h>
 #include "view.h"
-#include "print.h"
+#include "types.h"
 
-Status read_and_validate_view_args(char* argv[],ViewInfo *viewinfo){
 
-    /* Validate MP3 file name given or not */
-    if(argv[2] == NULL){
-        printf("./a.out -v sample_file.mp3\n");
+
+static const char* tag[] = {"TIT2","TPE1","TALB","TYER","TCON","COMM"};
+int num=1;
+
+Status read_and_validate_args(char *argv[],V_MP3INFO *vinfo)
+{
+    // check file extention (.mp3)
+    char *dot = strrchr(argv[2],'.');
+    if(strcmp(dot,".mp3")!=0)
+    {
+        printf("ERROR : Source file extention must be \".mp3\"\n");
+        return e_failure;
+    }
+    vinfo->mp3_fname = argv[2];
+
+    // open file
+    if(open_files(vinfo) == e_failure)
+    {
+        printf("ERROR : Unable to access the file\n");
         return e_failure;
     }
 
-    /* Validate MP3 file name */
-    char *dot = strchr(argv[2],'.');
-    if((dot == NULL) || (strcmp(dot,".mp3") != 0)){
-        printf("Error : File must be .mp3 file\n");
-        return e_failure;
+    // check signature first 3 byts as (V_MP3INFO)
+    char signature[3];
+    fread(signature,3,1,vinfo->fptr_mp3);
+    signature[3]=0;
+    if(strcmp(signature,"ID3")!=0)
+    {
+        printf("ERROR : Signature of MP3 file doesnt match\n");
+         return e_failure;
     }
 
-    viewinfo->mp3_fname = argv[2];      //storing mp3 file name
-
-    viewinfo->fptr_mp3 = fopen(viewinfo->mp3_fname,"r");    //open mp3 file
-
-    if(viewinfo->fptr_mp3 == NULL){
-        printf("Error : MP3 file not opened\n");
-        return e_failure;
-    }
-
-
-    /* Validate signature */
-    char signature [3];
-    if(fread(signature,3,1,viewinfo->fptr_mp3) == 0){
-        printf("Error : Unable to read ID3 signature\n");
-        return e_failure;
-    }
-    
-    if(strncmp(signature,"ID3",3) != 0){
-        printf("Error : ID3 signature invalid\n");
-        return e_failure;
-    }
-    
+    // set offset at 10th position
+    fseek(vinfo->fptr_mp3,10,SEEK_SET);
     return e_success;
-
 }
 
-Status do_view(ViewInfo *viewinfo)
+Status open_files(V_MP3INFO *vinfo)
 {
-    print_start_format();
+    vinfo->fptr_mp3=fopen(vinfo->mp3_fname,"rb");
+    // check for NULL
+    if(vinfo->fptr_mp3==NULL)
+    {
+        return e_failure;
+    }
+    return e_success;
+}
 
-    fseek(viewinfo->fptr_mp3,10,SEEK_SET);      /* Move offset to 10th pos */
 
+uint get_size(unsigned char *size_buffer)
+{
+    // convert big endiness to little
+    for(int i=0;i<2;i++)
+    {
+       unsigned char temp = size_buffer[i];
+       size_buffer[i] = size_buffer[3-i]; 
+       size_buffer[3-i] = temp;
+    }
     
+    // get size
+    uint size;
+    unsigned char *ptr = (unsigned char *)&size;
+    for(int i=0;i<4;i++)
+    {
+        ptr[i]=size_buffer[i];
+    }
+    return size;
+}
+
+
+void view_operation(V_MP3INFO *vinfo)
+{
+    char tag_buffer[5];
+    unsigned char size_buffer[4];
+    uint size;
+
+    printf("\n-----------------------------------------------------------\n");
+    printf("SL.NO |  TAG \t|  INFORMATION\n");
+    printf("-----------------------------------------------------------\n");
     for(int i=0;i<6;i++)
     {
-        /* Read frame ID */
-        if(fread(viewinfo->frame_id,4,1,viewinfo->fptr_mp3) == 0){
-            printf("Error : Unable to read Frame ID from MP3 file\n");
-            return e_failure;
-        }
+        // read 4 bytes for file for tags
+        fread(tag_buffer,4,1,vinfo->fptr_mp3);
+        tag_buffer[4]='\0';
 
-        viewinfo->frame_id[4] = '\0';
+        // read 4 bytes for size for song vinfo
+        fread(size_buffer,4,1,vinfo->fptr_mp3);
 
-        /* Read frame size */
-        unsigned char buffer[4];
-
-        if(fread(buffer,4,1,viewinfo->fptr_mp3) == 0){
-            printf("Error : Unable to read size of Frame from MP3 file\n");
-            return e_failure;
-        }
-
-            /* Change endianess */
-        viewinfo->frame_size = 0;
-
-        for(int j=0;j<4;j++){
-            viewinfo->frame_size = (viewinfo->frame_size << 8) | buffer[j];
-        }
-
+        size = get_size(size_buffer);
         
-        fseek(viewinfo->fptr_mp3,2,SEEK_CUR);       /* Moving offset by 2 pos */
+        // skip 3 bytes (2 bytes for flag and 1 bytes for null char)
+        fseek(vinfo->fptr_mp3,3,SEEK_CUR);
+        
+        char buffer[size];
+        // read size-1 bytes of song vinfo
+        fread(buffer,size-1,1,vinfo->fptr_mp3);
+        buffer[size-1]='\0';
 
-        if(validate(viewinfo->frame_id) == e_success)
+        // compare tag_buffer with tags
+        for(int j=0;j<6;j++)
         {
-            printf("%d\t|\t%s\t|\t",i+1,viewinfo->frame_id);
-
-            /* Printing the meta data */
-            char data_buffer[viewinfo->frame_size + 1];
-
-            if(fread(data_buffer,viewinfo->frame_size,1,viewinfo->fptr_mp3) == 0){
-                printf("Error : Unable to read Frame data\n");
-                return e_failure;
+            if(!strcmp(tag_buffer,tag[j]))
+            {
+                printf("  %d   |  %s  \t|  %s\n",num++,tag_buffer,buffer);
+                break;
             }
-
-            data_buffer[viewinfo->frame_size] = '\0';
-
-            printf("%s\n",data_buffer+1);
-        }
-        else
-        {
-            /* Skip unrecognised frame data */
-            fseek(viewinfo->fptr_mp3,viewinfo->frame_size,SEEK_CUR);
         }
     }
-    print_end_format();
+    printf("-----------------------------------------------------------\n\n");
+    fclose(vinfo->fptr_mp3);
+    return;
+}    
 
-    return e_success;
-}
-
-Status validate(char frameid[]){
-    if ((strcmp(frameid,"TPE1") == 0) ||
-        (strcmp(frameid,"TIT2") == 0) ||
-        (strcmp(frameid,"TALB") == 0) ||
-        (strcmp(frameid,"TYER") == 0) ||
-        (strcmp(frameid,"TCON") == 0) ||
-        (strcmp(frameid,"COMM") == 0))
-    {
-        return e_success;
-    }
-
-    return e_failure;
-}

@@ -1,282 +1,199 @@
 #include<stdio.h>
 #include<string.h>
-#include "types.h"
-#include "view.h"
-#include "edit.h"
+#include"types.h"
+#include"edit.h"
 
-void menu(){
-    printf("1. -v -> to view mp3 file contens\n");
-    printf("2. -3 -> to edit mp3 file contens\n");
-    printf("\t2.1. -t -> to edit song title\n");
-    printf("\t2.2. -a -> to edit artist name\n");
-    printf("\t2.3. -A -> to edit ablbum name\n");
-    printf("\t2.4. -y -> to edit year\n");
-    printf("\t2.5. -m -> to edit content\n");
-    printf("\t2.6. -c -> to edit comment\n");
-}
-
-char* get_frame(char ch){
-    switch(ch){
-        case 'a' : return "TPE1";
-        case 't' : return "TIT2";
-        case 'A' : return "TALB";
-        case 'y' : return "TYER";
-        case 'm' : return "TCON";
-        case 'c' : return "COMM";
-        default  : return NULL;
-    }
-}
-
-Status validate_edit_tag(char ch){
-    if(get_frame(ch) != NULL) 
-       return e_success;
-
-    return e_failure;
-}
-
-Status read_and_validate_edit_args(char *argv[],ViewInfo *viewinfo)
+Status read_and_validate_edit_args(char *argv[],E_MP3INFO *einfo)
 {
-    /* Validating edit option */
-    if(validate_edit_tag(argv[2][1]) == e_failure){
-        printf("Invalid edit option\n");
+    if(get_tag_to_edit(argv[2][1], einfo) == e_failure)
+    {
         return e_failure;
     }
 
-    viewinfo->edit_frame = get_frame(argv[2][1]);   // Storing edit Frame ID 
-
-    viewinfo->edit_data = argv[3];      // Storing edit data 
-
-    
-    /* Validate MP3 file name */
-    char *dot = strchr(argv[4],'.');
-    if((dot == NULL) || (strcmp(dot,".mp3") != 0)){
-        printf("Error : File must be .mp3 file\n");
+    char *dot = strrchr(argv[4],'.');
+    if(strcmp(dot,".mp3")!=0)
+    {
+        printf("ERROR : Source file extention must be \".mp3\"\n");
         return e_failure;
     }
-    
-    viewinfo->mp3_fname = argv[4];      // Storing mp3 file name
+    einfo->new_data=argv[3];
+    einfo->mp3_fname = argv[4];
+    einfo->temp_mp3_fname= "temp.mp3";
 
-    viewinfo->fptr_mp3 = fopen(viewinfo->mp3_fname,"r");
-
-    if(viewinfo->fptr_mp3 == NULL){
-        printf("Error : MP3 file not opened\n");
+    if(open_edit_files(einfo) == e_failure)
+    {
+        printf("ERROR : Unable to access the file\n");
         return e_failure;
     }
-    
+
+    // check signature first 3 byts as (V_MP3INFO)
+    char signature[3];
+    fread(signature,3,1,einfo->fptr_mp3);
+    signature[3]=0;
+    if(strcmp(signature,"ID3")!=0)
+    {
+        printf("ERROR : Signature of MP3 file doesnt match\n");
+         return e_failure;
+    }
+
+    // set offset at 10th position
+    rewind(einfo->fptr_mp3);
     return e_success;
 }
 
-Status do_edit(ViewInfo *viewinfo)
+Status open_edit_files(E_MP3INFO *einfo)
 {
-    if(create_file(viewinfo) == e_failure){
-        printf("Error : File not opened\n");
+    einfo->fptr_mp3=fopen(einfo->mp3_fname,"rb");
+    // check for NULL
+    if(einfo->fptr_mp3==NULL)
+    {
         return e_failure;
     }
-
-    if(copy_header(viewinfo) == e_failure){
-        printf("Error : Header not copied\n");
+    einfo->fptr_temp_mp3= fopen(einfo->temp_mp3_fname,"wb");
+    if(einfo->fptr_temp_mp3==NULL)
+    {
         return e_failure;
     }
+    return e_success;
+}
 
+uint get_e_size(unsigned char *size_buffer)
+{
+    // convert big endiness to little
+    for(int i=0;i<2;i++)
+    {
+       unsigned char temp = size_buffer[i];
+       size_buffer[i] = size_buffer[3-i]; 
+       size_buffer[3-i] = temp;
+    }
     
-    while(1){ 
-        char tag_buffer[5];     // Tag ID copy 
-        
-        if(fread(tag_buffer,4,1,viewinfo->fptr_mp3) == 0){
-            printf("Error : Unable to read tag\n");
-            return e_failure;
-        }
+    // get size
+    uint size;
+    unsigned char *ptr = (unsigned char *)&size;
+    for(int i=0;i<4;i++)
+    {
+        ptr[i]=size_buffer[i];
+    }
+    return size;
+}
 
-        tag_buffer[4] = '\0';
-        
-        /* if tag is matched */
-        if(strcmp(tag_buffer,viewinfo->edit_frame) == 0)
+void convert_little_to_big(int size, unsigned char *new_size)
+{
+    unsigned char *ptr = (unsigned char *)&size;
+    int i;
+    for(i=0;i<4;i++)
+    {
+        new_size[i] = ptr[3-i];
+    }
+    //new_size[i]='\0';
+}
+
+
+void do_edit(E_MP3INFO *einfo)
+{
+    char tag_buffer[5];
+    unsigned char size_buffer[4];
+    unsigned char new_size[4];
+    uint size;
+
+    // copy 10 bytes of header
+    char header_buffer[10];
+    fread(header_buffer,10,1,einfo->fptr_mp3);
+    fwrite(header_buffer,10,1,einfo->fptr_temp_mp3);
+
+    for(int i=0;i<6;i++)
+    {
+        // read nd write 4 bytes for file for tags
+        fread(tag_buffer,4,1,einfo->fptr_mp3);
+        fwrite(tag_buffer,4,1,einfo->fptr_temp_mp3);
+        tag_buffer[4]='\0';
+
+        // read nd write 4 bytes for size for song einfo
+        fread(size_buffer,4,1,einfo->fptr_mp3);
+        size = get_e_size(size_buffer);
+        convert_little_to_big(size,size_buffer);
+
+        if(strcmp(tag_buffer,einfo->tag_to_edit) == 0)
         {
-            if(edit_tag(viewinfo,tag_buffer) == e_failure){
-                printf("Error : Unable to edit tag data\n");
-                return e_failure;
-            }
+            // add new info and new size
+            convert_little_to_big((strlen(einfo->new_data)+1),new_size);
+            // for(int i = 0; i < 4; i++)
+            // {
+            //     printf("%02X ", new_size[i]);
+            // }
+            fwrite(new_size,1,4,einfo->fptr_temp_mp3);
 
+            char flag_buffer[3];
+            fread( flag_buffer,3,1,einfo->fptr_mp3);
+            fwrite(flag_buffer,3,1,einfo->fptr_temp_mp3);
+
+            fwrite(einfo->new_data,strlen(einfo->new_data),1,einfo->fptr_temp_mp3);
+
+            fseek(einfo->fptr_mp3,size-1,SEEK_CUR);
             break;
         }
-        else        // tag is not matched
-        {
-            if(copy_data(viewinfo,tag_buffer) == e_failure){
-                printf("Error : Unable to copy data\n");
-                return e_failure;
-            }
-        }
+
+        fwrite(size_buffer,4,1,einfo->fptr_temp_mp3);
+        
+        // read nd write 3 bytes (2 bytes for flag and 1 bytes for null char)
+        char flag_buffer[3];
+        fread( flag_buffer,3,1,einfo->fptr_mp3);
+        fwrite(flag_buffer,3,1,einfo->fptr_temp_mp3);
+        
+        char info_buffer[size];
+        // read nd write size-1 bytes of song vinfo
+        fread(info_buffer,size-1,1,einfo->fptr_mp3);
+        fwrite(info_buffer,size-1,1,einfo->fptr_temp_mp3);
     }
-
-    int ch;
-    while((ch = fgetc(viewinfo->fptr_mp3)) != EOF){
-        fwrite(&ch,1,1,viewinfo->fptr_temp_mp3);
+    char data;
+    while(fread(&data,1,1,einfo->fptr_mp3) == 1)
+    {
+        fwrite(&data,1,1,einfo->fptr_temp_mp3);
     }
+    printf("\nSuccessfully Edited\n\n");
+    fclose(einfo->fptr_mp3);
+    fclose(einfo->fptr_temp_mp3);
 
-    fclose(viewinfo->fptr_mp3);
-    fclose(viewinfo->fptr_temp_mp3);
-
-
-    /* Deleting the main file */
-    if(remove(viewinfo->mp3_fname) != 0){
-        printf("Error : Unable to change main file name\n");
-        return e_failure;
-    }
-
-    /* Renaming the temp file to main file */
-    if(rename(viewinfo->temp_mp3_fname,viewinfo->mp3_fname) != 0){
-        printf("Error : Unable to change name file name\n");
-        return e_failure;
-    }
-
-    return e_success;
+    remove_rename(einfo);
+    return;
 }
 
-Status create_file(ViewInfo *viewinfo)
+Status get_tag_to_edit(char e_tag, E_MP3INFO *einfo)
 {
-    /* Creating temp.mp3 file */
-    viewinfo->temp_mp3_fname = "temp.mp3";
+    switch(e_tag)
+    {
+        case 't':
+           einfo->tag_to_edit = "TIT2";
+            break;
 
-    viewinfo->fptr_temp_mp3 = fopen(viewinfo->temp_mp3_fname,"w");
+        case 'a':
+           einfo->tag_to_edit = "TPE1";
+            break;
 
-    if(viewinfo->fptr_temp_mp3 == NULL){
-        printf("Error : Temp file not opened\n");
-        return e_failure;
+        case 'A':
+           einfo->tag_to_edit = "TALB";
+            break;
+
+        case 'c':
+           einfo->tag_to_edit = "TCON";
+            break;
+
+        case 'y':
+           einfo->tag_to_edit = "TYER";
+            break;
+
+        case 'm':
+           einfo->tag_to_edit = "COMM";
+            break;
+        default :
+            return e_failure;
     }
-
-    return e_success;
+    e_success;
 }
 
-Status copy_header(ViewInfo *viewinfo)
+
+void remove_rename(E_MP3INFO *einfo)
 {
-    rewind(viewinfo->fptr_mp3);    // Bring cursor back to 0th byte in song.mp3 file
-
-    /* Copying header to temp.mp3 */
-    char header_buffer[10];
-
-    if(fread(header_buffer,10,1,viewinfo->fptr_mp3) == 0){
-        printf("Error : Header not copied\n");
-        return e_failure;
-    }
-
-    if(fwrite(header_buffer,10,1,viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Unable to write header in temp file\n");
-        return e_failure;
-    }
-
-    return e_success;
-}
-
-Status edit_tag(ViewInfo *viewinfo, char tag_buffer[])
-{
-    /* Copy the tag */
-    if(fwrite(tag_buffer,4,1,viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Tag not copied\n");
-        return e_failure;
-    }
-
-    /* Copying the size of meta data */
-    viewinfo->new_frame_size = strlen(viewinfo->edit_data) + 1;
-
-    /* Copy size in temp file */
-    char size_buffer[4];
-    uint size = viewinfo->new_frame_size;
-    for(int i=3;i>=0;i--){          // Converting integer to big endian
-        size_buffer[i] = size & 0xFF;
-        size >>= 8;
-    }
-    
-    if(fwrite(size_buffer,4,1,viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Unable to copy size of meta data to temp file\n");
-        return e_failure;
-    }
-
-    /* Storing old size of metadata */
-    char buffer[4];
-    if(fread(buffer,4,1,viewinfo->fptr_mp3) == 0)
-        return e_failure;
-
-    big_endian_to_integer(buffer,viewinfo);
-
-    /* Copying flag + '\0' */
-
-    char flag_buffer[3];
-    if(fread(flag_buffer,3,1,viewinfo->fptr_mp3) == 0){
-        return e_failure;
-    }
-
-    if(fwrite(flag_buffer,3,1,viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Unable to copy flag in temp file\n");
-        return e_failure;
-    }
-
-    if(fwrite(viewinfo->edit_data,viewinfo->new_frame_size - 1, 1, viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Unable to copy new data to temp file\n");
-        return e_failure;
-    }
-
-    /* moving the cursor */
-    fseek(viewinfo->fptr_mp3,viewinfo->frame_size - 1, SEEK_CUR);
-
-    return e_success;
-}
-
-Status copy_data(ViewInfo *viewinfo, char tag_buffer[])
-{
-    /* Copying the tag */
-    if(fwrite(tag_buffer,4,1,viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Tag not copied\n");
-        return e_failure;
-    }
-
-    /* Copy size of metadata */
-    char size_buffer[4];
-    if(fread(size_buffer,4,1,viewinfo->fptr_mp3) == 0){
-        printf("Error : Unable to read frame size\n");
-        return e_failure;
-    }
-
-    if(fwrite(size_buffer,4,1,viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Unable to copy size in temp file\n");
-        return e_failure;
-    }
-
-    big_endian_to_integer(size_buffer,viewinfo);       //Convert big-endian bytes to integer
-
-    /* Copying flag */
-    char flag_buffer[2];
-    if(fread(flag_buffer,2,1,viewinfo->fptr_mp3) == 0){
-        printf("Error : Unable to read flags\n");
-        return e_failure;
-    }
-
-    if(fwrite(flag_buffer,2,1,viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Unable to copy flag in temp file\n");
-        return e_failure;
-    }
-
-    /* copying meta data */
-    char data_buffer[viewinfo->frame_size];
-    if(fread(data_buffer,viewinfo->frame_size,1,viewinfo->fptr_mp3) == 0){
-        printf("Error : Unable to read meta data of [%s]\n",tag_buffer);
-        return e_failure;
-    }
-
-    if(fwrite(data_buffer,viewinfo->frame_size,1,viewinfo->fptr_temp_mp3) == 0){
-        printf("Error : Unable to copy meta data in temp file\n");
-        return e_failure;
-    }
-
-    return e_success;
-}
-
-Status big_endian_to_integer(char buffer[], ViewInfo *viewinfo)
-{
-    viewinfo->frame_size = 0;
-
-    for(int i=0;i<4;i++){
-        viewinfo->frame_size = (viewinfo->frame_size << 8) | (unsigned char)buffer[i];
-    }
-
-    return e_success;
+    remove(einfo->mp3_fname);
+    rename(einfo->temp_mp3_fname,einfo->mp3_fname);
 }
